@@ -50,3 +50,9 @@
 
 ### 質問17: OMAPIにはARA-Mの規制がありますよね。エンドユーザーが使えるんですか？
 **回答:** 開発者がよくやるブートローダーアンロック、あるいは、開発者用のARA-M書き換え可能SIMカードを使うことを想定してます。何度も言うけど、これは開発者専用ですよ。
+
+### 質問18: Observeモードとは何か？
+**回答:** Androidの開発者ドキュメント（[developer.android.com](https://developer.android.com/)）やAOSPのコード（[cs.android.com](https://cs.android.com/)）を読んでください。
+
+### 質問19: AndroidのAPIの仕様がわかりません
+**回答:** Androidの開発者ドキュメント（[developer.android.com](https://developer.android.com/)）やAOSPのコード（[cs.android.com](https://cs.android.com/)）を読んでください。
