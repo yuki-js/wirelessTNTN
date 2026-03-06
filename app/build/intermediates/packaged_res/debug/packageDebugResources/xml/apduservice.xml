@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/servicedesc"
+    android:requireDeviceUnlock="true"
+    android:shouldDefaultToObserveMode="true">
+    <!-- No static AID filters - registered dynamically -->
+</host-apdu-service>

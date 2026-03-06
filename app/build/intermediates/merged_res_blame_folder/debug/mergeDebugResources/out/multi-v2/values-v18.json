@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "app.aoki.yuki.wirelesstntn.app-mergeDebugResources-22:/values-v18/values-v18.xml",
+            "map": [
+                {
+                    "source": "/home/runner/.gradle/caches/transforms-4/172f3c567669a7fbc61b1c1307dcb23a/transformed/appcompat-1.7.0/res/values-v18/values-v18.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "48",
+                        "endOffsets": "99"
+                    }
+                }
+            ]
+        }
+    ]
+}
