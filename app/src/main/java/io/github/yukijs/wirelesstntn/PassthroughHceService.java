@@ -75,7 +75,7 @@ public class PassthroughHceService extends HostApduService {
      */
     @Override
     public byte[] processCommandApdu(byte[] commandApdu, Bundle extras) {
-        String hex = bytesToHex(commandApdu);
+        String hex = OmapiManager.bytesToHex(commandApdu);
         AppLog.log("NFC << " + hex);
 
         if (isSelectAid(commandApdu)) {
@@ -101,7 +101,7 @@ public class PassthroughHceService extends HostApduService {
      */
     private byte[] handleSelectAid(byte[] selectApdu) {
         byte[] aid = extractAid(selectApdu);
-        AppLog.log("SELECT AID: " + bytesToHex(aid));
+        AppLog.log("SELECT AID: " + OmapiManager.bytesToHex(aid));
 
         // Close any channel left over from a previous SELECT in this session.
         closeChannelAndSession();
@@ -110,7 +110,7 @@ public class PassthroughHceService extends HostApduService {
             Channel ch = mOmapi.openLogicalChannel(aid);
             mOpenChannel = ch;
             byte[] resp = ch.getSelectResponse();
-            AppLog.log("SE >> " + bytesToHex(resp));
+            AppLog.log("SE >> " + OmapiManager.bytesToHex(resp));
             return resp;
         } catch (IOException e) {
             AppLog.log("AID rejected (" + e.getMessage() + ") – staying in observe mode");
@@ -127,13 +127,13 @@ public class PassthroughHceService extends HostApduService {
      */
     private byte[] forwardApdu(byte[] commandApdu) {
         if (mOpenChannel == null || mOpenChannel.isClosed()) {
-            AppLog.log("No open channel for APDU " + bytesToHex(commandApdu));
+            AppLog.log("No open channel for APDU " + OmapiManager.bytesToHex(commandApdu));
             return SW_CONDITIONS;
         }
 
         try {
             byte[] response = mOpenChannel.transmit(commandApdu);
-            AppLog.log("SE >> " + bytesToHex(response));
+            AppLog.log("SE >> " + OmapiManager.bytesToHex(response));
             return response;
         } catch (IOException e) {
             AppLog.log("Transmit failed: " + e.getMessage());
@@ -184,9 +184,5 @@ public class PassthroughHceService extends HostApduService {
         byte[] aid = new byte[lc];
         System.arraycopy(selectApdu, 5, aid, 0, lc);
         return aid;
-    }
-
-    private static String bytesToHex(byte[] bytes) {
-        return OmapiManager.bytesToHex(bytes);
     }
 }

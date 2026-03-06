@@ -68,6 +68,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean mUserEnabled = false;
     /** Whether the passthrough is currently live (foreground + user-enabled). */
     private boolean mPassthroughActive = false;
+    /** Cached hardware capability – doesn't change at runtime. */
+    private boolean mObserveModeSupported = false;
 
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
 
@@ -130,6 +132,7 @@ public class MainActivity extends AppCompatActivity {
         }
         mCardEmulation = CardEmulation.getInstance(mNfcAdapter);
         mHceComponent  = new ComponentName(this, PassthroughHceService.class);
+        mObserveModeSupported = NfcAdapter.isObserveModeSupported(this);
 
         // Start with observe mode ON so the device is invisible until the
         // user explicitly enables the passthrough.
@@ -270,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
      */
     private void setObserveMode(boolean enable) {
         if (mNfcAdapter == null) return;
-        if (!NfcAdapter.isObserveModeSupported(this)) {
+        if (!mObserveModeSupported) {
             if (enable) {
                 AppLog.log(getString(R.string.observe_not_supported));
             }
