@@ -24,6 +24,8 @@ public class OmapiSessionManager {
     private Callback pendingCallback;
 
     public void connect(Context ctx, String readerName, Callback cb) {
+        // Disconnect any previous session before reconnecting.
+        disconnect();
         this.targetReaderName = readerName;
         this.pendingCallback = cb;
         Executor executor = Executors.newSingleThreadExecutor();

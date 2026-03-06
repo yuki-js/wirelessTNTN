@@ -65,17 +65,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startSession() {
+        PassthroughHceService svc = PassthroughHceService.getInstance();
+        if (svc == null) {
+            AppLog.e("MainActivity: HCE service not running; tap NFC or wait a moment");
+            return;
+        }
+
         String readerName = (String) seSpinner.getSelectedItem();
         AppLog.i("MainActivity: starting session, reader=" + readerName);
 
         registerAids();
-
-        PassthroughHceService svc = PassthroughHceService.getInstance();
-        if (svc != null) {
-            svc.startPassthrough(readerName);
-        } else {
-            AppLog.e("MainActivity: service not ready yet");
-        }
+        svc.startPassthrough(readerName);
 
         sessionActive = true;
         seSpinner.setEnabled(false);

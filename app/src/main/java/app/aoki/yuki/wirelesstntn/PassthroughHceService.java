@@ -10,8 +10,10 @@ import android.os.Bundle;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-// processPollingFrames requires minSdk 35; CardEmulation observe methods require API 35
+// processPollingFrames and CardEmulation.setShouldDefaultToObserveModeForService require API 35
 @SuppressLint("NewApi")
 public class PassthroughHceService extends HostApduService {
 
@@ -19,7 +21,7 @@ public class PassthroughHceService extends HostApduService {
     private static final byte[] SW_INTERNAL_ERROR  = {0x6F, 0x00};
     private static final byte[] SW_OK              = {(byte) 0x90, 0x00};
 
-    // Static instance — HostApduService.onBind() is final, cannot use ServiceConnection
+    // Static instance — HostApduService.onBind() is final, cannot use ServiceConnection.
     private static volatile PassthroughHceService instance;
 
     public static PassthroughHceService getInstance() {
@@ -28,25 +30,28 @@ public class PassthroughHceService extends HostApduService {
 
     private OmapiSessionManager omapiManager;
     private PollingFrameObserver pollingFrameObserver;
+    // Single-thread executor for OMAPI I/O; avoids blocking the main thread.
+    private ExecutorService apduExecutor;
     private volatile boolean active = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
+        apduExecutor = Executors.newSingleThreadExecutor();
         omapiManager = new OmapiSessionManager();
         pollingFrameObserver = new PollingFrameObserver(new PollingFrameObserver.Callback() {
             @Override
             public void onReaderDetected() {
                 if (active) {
-                    AppLog.i("PassthroughHceService: reader detected, switching to active mode");
+                    AppLog.i("PassthroughHceService: reader detected, exiting observe mode");
                     setObserveMode(false);
                 }
             }
 
             @Override
             public void onFrameLog(String description) {
-                // already logged in AppLog by PollingFrameObserver
+                // logged via AppLog inside PollingFrameObserver
             }
         });
         AppLog.i("PassthroughHceService: created");
@@ -55,6 +60,7 @@ public class PassthroughHceService extends HostApduService {
     @Override
     public void onDestroy() {
         instance = null;
+        apduExecutor.shutdownNow();
         omapiManager.disconnect();
         AppLog.i("PassthroughHceService: destroyed");
         super.onDestroy();
@@ -63,6 +69,7 @@ public class PassthroughHceService extends HostApduService {
     public void startPassthrough(String readerName) {
         active = true;
         AppLog.i("PassthroughHceService: starting passthrough, reader=" + readerName);
+        // Default to observe mode; PollingFrameObserver will exit observe mode when a reader arrives.
         setObserveMode(true);
         omapiManager.connect(this, readerName, new OmapiSessionManager.Callback() {
             @Override
@@ -80,14 +87,14 @@ public class PassthroughHceService extends HostApduService {
 
     public void stopPassthrough() {
         active = false;
-        omapiManager.closeChannel();
+        omapiManager.disconnect();
         setObserveMode(true);
         AppLog.i("PassthroughHceService: stopped passthrough");
     }
 
     /**
-     * Toggle observe mode via CardEmulation.setShouldDefaultToObserveModeForService.
-     * setObserveModeEnabled() does not exist in HostApduService; this is the correct API 35 approach.
+     * Toggle observe mode via CardEmulation.setShouldDefaultToObserveModeForService (API 35).
+     * HostApduService does not expose setObserveModeEnabled(); this is the correct approach.
      */
     private void setObserveMode(boolean enable) {
         NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
@@ -103,19 +110,31 @@ public class PassthroughHceService extends HostApduService {
         pollingFrameObserver.onPollingFrames(frames);
     }
 
+    /**
+     * Returns null to signal async processing; the actual response is sent via sendResponseApdu()
+     * from the OMAPI executor thread. This avoids blocking the main thread during SE I/O.
+     */
     @Override
     public byte[] processCommandApdu(byte[] apdu, Bundle extras) {
         if (apdu == null || apdu.length < 4) {
             return SW_INTERNAL_ERROR;
         }
-
         AppLog.d("PassthroughHceService: APDU -> " + bytesToHex(apdu));
 
+        final byte[] apduCopy = Arrays.copyOf(apdu, apdu.length);
+        apduExecutor.execute(() -> {
+            byte[] response = dispatchApdu(apduCopy);
+            sendResponseApdu(response);
+        });
+        // null = response will be sent asynchronously via sendResponseApdu()
+        return null;
+    }
+
+    private byte[] dispatchApdu(byte[] apdu) {
         // SELECT AID: CLA=00 INS=A4 P1=04
         if (apdu[0] == 0x00 && apdu[1] == (byte) 0xA4 && apdu[2] == 0x04) {
             return handleSelect(apdu);
         }
-
         return forwardApdu(apdu);
     }
 
@@ -157,6 +176,7 @@ public class PassthroughHceService extends HostApduService {
         AppLog.i("PassthroughHceService: deactivated reason=" + reason);
         omapiManager.closeChannel();
         if (active) {
+            // Re-enter observe mode so we can detect the next reader interaction.
             setObserveMode(true);
         }
     }
