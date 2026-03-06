@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#1565C0</color>
+    <color name="colorPrimaryDark">#003c8f</color>
+    <color name="colorAccent">#4fc3f7</color>
+
+    <color name="status_active">#00C853</color>
+    <color name="status_inactive">#9E9E9E</color>
+    <color name="status_observe">#FFB300</color>
+
+    <color name="log_background">#111111</color>
+    <color name="log_text">#00E676</color>
+
+    <color name="ic_launcher_background">#1565C0</color>
+
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

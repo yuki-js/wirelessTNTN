@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    HCE service descriptor.
+
+    Registers a set of common developer / SE-test AIDs in the "other" category.
+    When MainActivity calls CardEmulation.setPreferredService() the Android NFC
+    routing layer will send *all* non-payment AID selections to this service,
+    even if the AID is not in the list below.  That makes this registration
+    the catch-all hook we need for the SE passthrough.
+
+    Payment AIDs (Visa / MC etc.) are intentionally excluded – this is a
+    developer tool, not a payment app.
+-->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/service_description"
+    android:requireDeviceUnlock="false">
+
+    <aid-group
+        android:description="@string/aid_group_description"
+        android:category="other">
+
+        <!-- ISO/IEC 7816-4 test / developer AIDs -->
+        <!-- GP Issuer Security Domain -->
+        <aid-filter android:name="A000000151000000" />
+        <!-- GP Supplementary Security Domain -->
+        <aid-filter android:name="A000000151535041" />
+        <!-- Common developer test AID -->
+        <aid-filter android:name="F0010203040506" />
+        <!-- PKCS#15 / e-passport / e-ID common roots -->
+        <aid-filter android:name="A000000077010800" />
+        <aid-filter android:name="A0000002471001" />
+        <!-- OpenMobileAPI test applet AID -->
+        <aid-filter android:name="D2760000850101" />
+        <!-- Transit / transport (IC card common service AID) -->
+        <aid-filter android:name="0003000000000000" />
+        <!-- Mifare / FeliCa use proprietary framing and are not routed here -->
+
+    </aid-group>
+
+</host-apdu-service>

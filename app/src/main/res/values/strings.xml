@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WirelessTNTN</string>
+    <string name="service_description">SE NFC Passthrough</string>
+    <string name="aid_group_description">Secure Element Passthrough</string>
+
+    <!-- UI labels -->
+    <string name="select_reader_label">Secure Element</string>
+    <string name="enable_passthrough">Enable Passthrough</string>
+    <string name="disable_passthrough">Disable Passthrough</string>
+    <string name="log_label">Log</string>
+    <string name="clear_log">Clear</string>
+
+    <!-- Status strings -->
+    <string name="status_active">● ACTIVE</string>
+    <string name="status_inactive">○ INACTIVE</string>
+    <string name="status_observe">◉ OBSERVING</string>
+
+    <!-- Error/info strings -->
+    <string name="nfc_unavailable">NFC is not available on this device.</string>
+    <string name="nfc_not_enabled">Please enable NFC in system settings.</string>
+    <string name="observe_not_supported">Observe mode not supported by hardware.</string>
+    <string name="no_readers_found">(No SE readers found)</string>
+    <string name="no_reader_selected">Please select a Secure Element reader.</string>
+    <string name="omapi_connecting">Connecting to SE service…</string>
+</resources>
