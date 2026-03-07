@@ -21,6 +21,18 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
 
+/**
+ * Main activity: SE reader selector, Start/Stop toggle, log viewer.
+ *
+ * Foreground-only operation:
+ *   - setPreferredService() is called in onResume() when a session is active,
+ *     making our HCE service the preferred target for NFC routing while this
+ *     activity is in the foreground.
+ *   - unsetPreferredService() is called in onPause() so the service is no longer
+ *     preferred when the app goes to the background.
+ *
+ * @see ref_aosp/NfcNci/testutils/src/com/android/nfc/emulator/BaseEmulatorActivity.java
+ */
 @SuppressLint("NewApi")
 public class MainActivity extends AppCompatActivity {
 
@@ -32,6 +44,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView logTextView;
     private ScrollView logScrollView;
 
+    private CardEmulation cardEmulation;
     private boolean sessionActive = false;
 
     @Override
@@ -43,6 +56,11 @@ public class MainActivity extends AppCompatActivity {
         startStopButton = findViewById(R.id.start_stop_button);
         logTextView    = findViewById(R.id.log_text_view);
         logScrollView  = findViewById(R.id.log_scroll_view);
+
+        NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
+        if (nfcAdapter != null) {
+            cardEmulation = CardEmulation.getInstance(nfcAdapter);
+        }
 
         startStopButton.setOnClickListener(v -> {
             if (sessionActive) stopSession();
@@ -57,6 +75,23 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // Refresh the SE reader list every time the user returns to the app.
         loadSeReaders();
+
+        // If a session is active, re-register as the preferred foreground service so that
+        // polling frames and APDUs continue to route to our service.
+        if (sessionActive && cardEmulation != null) {
+            cardEmulation.setPreferredService(this,
+                    new ComponentName(this, PassthroughHceService.class));
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Foreground-only: unregister as preferred service when leaving the foreground.
+        // The NFC system will no longer route traffic to our service while backgrounded.
+        if (cardEmulation != null) {
+            cardEmulation.unsetPreferredService(this);
+        }
     }
 
     @Override
@@ -71,8 +106,6 @@ public class MainActivity extends AppCompatActivity {
      */
     private void loadSeReaders() {
         try {
-            // SEService is created here only to list reader names; both it and its executor
-            // are shut down inside the callback once the names have been collected.
             SEService[] holder = new SEService[1];
             java.util.concurrent.ExecutorService listExecutor = Executors.newSingleThreadExecutor();
             holder[0] = new SEService(this, listExecutor, () -> {
@@ -109,6 +142,13 @@ public class MainActivity extends AppCompatActivity {
         // Register AID filters so Android routes NFC frames to our service.
         registerAids();
 
+        // Set as preferred foreground service — this is what makes our service receive
+        // polling frames while the activity is visible. Based on AOSP BaseEmulatorActivity.
+        if (cardEmulation != null) {
+            cardEmulation.setPreferredService(this,
+                    new ComponentName(this, PassthroughHceService.class));
+        }
+
         // Start the HCE service (only now, not before the user presses Start).
         Intent intent = new Intent(this, PassthroughHceService.class);
         intent.setAction(PassthroughHceService.ACTION_START);
@@ -125,6 +165,11 @@ public class MainActivity extends AppCompatActivity {
 
         unregisterAids();
 
+        // Unregister as preferred foreground service.
+        if (cardEmulation != null) {
+            cardEmulation.unsetPreferredService(this);
+        }
+
         Intent intent = new Intent(this, PassthroughHceService.class);
         intent.setAction(PassthroughHceService.ACTION_STOP);
         startService(intent); // delivers ACTION_STOP via onStartCommand
@@ -135,20 +180,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void registerAids() {
-        NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
-        if (nfcAdapter == null) { AppLog.e("NFC adapter not available"); return; }
-        CardEmulation ce = CardEmulation.getInstance(nfcAdapter);
+        if (cardEmulation == null) { AppLog.e("NFC adapter not available"); return; }
         ComponentName cn = new ComponentName(this, PassthroughHceService.class);
-        boolean ok = ce.registerAidsForService(cn, CardEmulation.CATEGORY_OTHER, AID_FILTERS);
+        boolean ok = cardEmulation.registerAidsForService(cn, CardEmulation.CATEGORY_OTHER, AID_FILTERS);
         AppLog.i("registerAidsForService=" + ok);
     }
 
     private void unregisterAids() {
-        NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
-        if (nfcAdapter == null) return;
-        CardEmulation ce = CardEmulation.getInstance(nfcAdapter);
+        if (cardEmulation == null) return;
         ComponentName cn = new ComponentName(this, PassthroughHceService.class);
-        ce.removeAidsForService(cn, CardEmulation.CATEGORY_OTHER);
+        cardEmulation.removeAidsForService(cn, CardEmulation.CATEGORY_OTHER);
     }
 
     private void appendLog(String msg) {

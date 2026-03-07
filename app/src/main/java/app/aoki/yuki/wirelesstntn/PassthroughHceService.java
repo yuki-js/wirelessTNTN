@@ -3,7 +3,6 @@ package app.aoki.yuki.wirelesstntn;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.nfc.NfcAdapter;
-import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.nfc.cardemulation.PollingFrame;
 import android.os.Bundle;
@@ -17,7 +16,20 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-// processPollingFrames and CardEmulation.setShouldDefaultToObserveModeForService require API 35
+/**
+ * NFC Host Card Emulation service that acts as a passthrough to a Secure Element via OMAPI.
+ *
+ * Observer Mode lifecycle (based on AOSP HostEmulationManager):
+ *   1. Start → enable observe mode via NfcAdapter.setObserveModeEnabled(true)
+ *   2. Reader polling frames arrive via processPollingFrames()
+ *   3. Once OMAPI session is ready → NfcAdapter.setObserveModeEnabled(false) to accept transaction
+ *   4. APDUs arrive via processCommandApdu() → forwarded through OMAPI
+ *   5. Field lost → onDeactivated() → re-enable observe mode
+ *   6. Repeat from 2
+ *
+ * This service only operates when the user presses Start in the activity; the activity
+ * registers itself as the preferred foreground service via CardEmulation.setPreferredService().
+ */
 @SuppressLint("NewApi")
 public class PassthroughHceService extends HostApduService {
 
@@ -50,9 +62,11 @@ public class PassthroughHceService extends HostApduService {
             @Override
             public void onReaderDetected() {
                 // Exit observe mode only after the OMAPI session is ready to handle APDUs.
+                // Uses NfcAdapter.setObserveModeEnabled(false) — the correct runtime toggle.
+                // (setShouldDefaultToObserveModeForService is a static preference, not a toggle.)
                 if (active && passthroughController != null) {
                     AppLog.i("PassthroughHceService: reader detected, exiting observe mode");
-                    setObserveMode(false);
+                    setObserveModeEnabled(false);
                 }
             }
             @Override public void onFrameLog(String description) {}
@@ -84,12 +98,11 @@ public class PassthroughHceService extends HostApduService {
 
     private void startPassthrough(String readerName) {
         active = true;
-        // Enter observe mode first; PollingFrameObserver exits it once a reader is detected
-        // and the OMAPI session is ready.
-        setObserveMode(true);
+        // Enter observe mode; PollingFrameObserver calls setObserveModeEnabled(false)
+        // once a reader is detected and the OMAPI session is ready.
+        setObserveModeEnabled(true);
         AppLog.i("PassthroughHceService: connecting OMAPI, reader=" + readerName);
 
-        // Use a dedicated executor for SEService callbacks (required by SEService constructor).
         seExecutor = Executors.newSingleThreadExecutor();
         seService = new SEService(getApplicationContext(), seExecutor, () -> {
             Reader[] readers = seService.getReaders();
@@ -114,18 +127,29 @@ public class PassthroughHceService extends HostApduService {
     private void stopPassthrough() {
         active = false;
         tearDownOmapi();
-        setObserveMode(true);
+        // Re-enable observe mode on stop so the NFC stack returns to passive observation.
+        setObserveModeEnabled(true);
         AppLog.i("PassthroughHceService: stopped");
     }
 
-    /** Toggle observe mode via the API 35 CardEmulation method. */
-    private void setObserveMode(boolean enable) {
+    /**
+     * Toggle observe mode at runtime via NfcAdapter.setObserveModeEnabled() (API 35).
+     *
+     * This is the correct runtime toggle. setShouldDefaultToObserveModeForService() is a
+     * static preference stored by RegisteredServicesCache; the actual enable/disable is
+     * performed by NfcAdapter.setObserveModeEnabled() which propagates through NfcService
+     * to the NFC controller firmware.
+     *
+     * @see ref_aosp/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
+     *      (allowOneTransaction, updateForShouldDefaultToObserveMode)
+     * @see ref_aosp/NfcNci/testutils/src/com/android/nfc/emulator/BaseEmulatorActivity.java
+     *      (setObserveModeEnabled)
+     */
+    private void setObserveModeEnabled(boolean enable) {
         NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
         if (nfcAdapter == null) return;
-        CardEmulation ce = CardEmulation.getInstance(nfcAdapter);
-        android.content.ComponentName cn =
-                new android.content.ComponentName(this, PassthroughHceService.class);
-        ce.setShouldDefaultToObserveModeForService(cn, enable);
+        boolean result = nfcAdapter.setObserveModeEnabled(enable);
+        AppLog.d("PassthroughHceService: setObserveModeEnabled(" + enable + ")=" + result);
     }
 
     @Override
@@ -172,7 +196,10 @@ public class PassthroughHceService extends HostApduService {
         }
         if (active) {
             // Re-enter observe mode so we can detect the next reader approach.
-            setObserveMode(true);
+            // AOSP HostEmulationManager re-enables observe mode after field-off with a
+            // RE_ENABLE_OBSERVE_MODE_DELAY_MS delay; we re-enable immediately here because
+            // we always want to catch the next reader.
+            setObserveModeEnabled(true);
         }
     }
 

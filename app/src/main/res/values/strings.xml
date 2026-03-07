@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">WirelessTNTN</string>
     <string name="servicedesc">NFC HCE Passthrough Service</string>
+    <string name="aiddescription">SE Passthrough AIDs</string>
     <string name="se_selector_label">Secure Element</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
