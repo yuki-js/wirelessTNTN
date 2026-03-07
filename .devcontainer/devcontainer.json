@@ -1,0 +1,36 @@
+{
+  "name": "wirelessTNTN",
+  "image": "ghcr.io/yuki-js/wirelesstntn-devcontainer:latest",
+  "remoteUser": "user",
+  "updateRemoteUserUID": true,
+  "workspaceFolder": "/home/user/codes/wirelesstntn",
+  "workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/home/user/codes/wirelesstntn",
+  "containerEnv": {
+    "ANDROID_SDK_ROOT": "/opt/android-sdk",
+    "ANDROID_HOME": "/opt/android-sdk",
+    "JAVA_HOME": "/usr/lib/jvm/java-17-openjdk-amd64",
+    "GRADLE_USER_HOME": "/home/user/.gradle",
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "XDG_RUNTIME_DIR": "${localEnv:XDG_RUNTIME_DIR}",
+    "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
+  },
+  "mounts": [
+    "source=gradle-cache,target=/home/user/.gradle,type=volume"
+  ],
+  "postCreateCommand": "git config --global --add safe.directory /home/user/codes/wirelesstntn && git config --global core.filemode false",
+  "runArgs": [
+    "--volume=/mnt/wslg:/mnt/wslg"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vscjava.vscode-gradle",
+        "redhat.java",
+        "vscjava.vscode-java-debug",
+        "vscjava.vscode-java-test"
+      ]
+    }
+  }
+}
