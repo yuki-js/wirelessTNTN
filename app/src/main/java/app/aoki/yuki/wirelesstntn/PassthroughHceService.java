@@ -1,11 +1,15 @@
 package app.aoki.yuki.wirelesstntn;
 
 import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.nfc.NfcAdapter;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.nfc.cardemulation.PollingFrame;
 import android.os.Bundle;
+import android.se.omapi.Reader;
+import android.se.omapi.SEService;
+import android.se.omapi.Session;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -17,85 +21,104 @@ import java.util.concurrent.Executors;
 @SuppressLint("NewApi")
 public class PassthroughHceService extends HostApduService {
 
-    private static final byte[] SW_FILE_NOT_FOUND = {0x6A, (byte) 0x82};
-    private static final byte[] SW_INTERNAL_ERROR  = {0x6F, 0x00};
-    private static final byte[] SW_OK              = {(byte) 0x90, 0x00};
+    static final String ACTION_START  = "app.aoki.yuki.wirelesstntn.START_PASSTHROUGH";
+    static final String ACTION_STOP   = "app.aoki.yuki.wirelesstntn.STOP_PASSTHROUGH";
+    static final String EXTRA_READER  = "reader_name";
+
+    private static final byte[] SW_INTERNAL_ERROR = {0x6F, 0x00};
 
     // Static instance — HostApduService.onBind() is final, cannot use ServiceConnection.
     private static volatile PassthroughHceService instance;
+    public static PassthroughHceService getInstance() { return instance; }
 
-    public static PassthroughHceService getInstance() {
-        return instance;
-    }
+    // OMAPI objects — created on start, torn down on stop.
+    private SEService seService;
+    private ApduPassthroughController passthroughController;
 
-    private OmapiSessionManager omapiManager;
     private PollingFrameObserver pollingFrameObserver;
-    // Single-thread executor for OMAPI I/O; avoids blocking the main thread.
-    private ExecutorService apduExecutor;
+    // Single-thread executor for OMAPI I/O (avoids blocking the NFC main thread).
+    private final ExecutorService apduExecutor = Executors.newSingleThreadExecutor();
+    // Executor for SEService callbacks; stored so it can be shut down with the session.
+    private ExecutorService seExecutor;
     private volatile boolean active = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
-        apduExecutor = Executors.newSingleThreadExecutor();
-        omapiManager = new OmapiSessionManager();
         pollingFrameObserver = new PollingFrameObserver(new PollingFrameObserver.Callback() {
             @Override
             public void onReaderDetected() {
-                if (active) {
+                // Exit observe mode only after the OMAPI session is ready to handle APDUs.
+                if (active && passthroughController != null) {
                     AppLog.i("PassthroughHceService: reader detected, exiting observe mode");
                     setObserveMode(false);
                 }
             }
-
-            @Override
-            public void onFrameLog(String description) {
-                // logged via AppLog inside PollingFrameObserver
-            }
+            @Override public void onFrameLog(String description) {}
         });
         AppLog.i("PassthroughHceService: created");
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null) {
+            if (ACTION_START.equals(intent.getAction())) {
+                String readerName = intent.getStringExtra(EXTRA_READER);
+                startPassthrough(readerName);
+            } else if (ACTION_STOP.equals(intent.getAction())) {
+                stopPassthrough();
+            }
+        }
+        return START_NOT_STICKY;
     }
 
     @Override
     public void onDestroy() {
         instance = null;
         apduExecutor.shutdownNow();
-        omapiManager.disconnect();
+        tearDownOmapi();
         AppLog.i("PassthroughHceService: destroyed");
         super.onDestroy();
     }
 
-    public void startPassthrough(String readerName) {
+    private void startPassthrough(String readerName) {
         active = true;
-        AppLog.i("PassthroughHceService: starting passthrough, reader=" + readerName);
-        // Default to observe mode; PollingFrameObserver will exit observe mode when a reader arrives.
+        // Enter observe mode first; PollingFrameObserver exits it once a reader is detected
+        // and the OMAPI session is ready.
         setObserveMode(true);
-        omapiManager.connect(this, readerName, new OmapiSessionManager.Callback() {
-            @Override
-            public void onConnected() {
-                AppLog.i("PassthroughHceService: OMAPI connected to " + readerName);
-            }
+        AppLog.i("PassthroughHceService: connecting OMAPI, reader=" + readerName);
 
-            @Override
-            public void onError(String message) {
-                AppLog.e("PassthroughHceService: OMAPI connect error: " + message);
-                active = false;
+        // Use a dedicated executor for SEService callbacks (required by SEService constructor).
+        seExecutor = Executors.newSingleThreadExecutor();
+        seService = new SEService(getApplicationContext(), seExecutor, () -> {
+            Reader[] readers = seService.getReaders();
+            for (Reader r : readers) {
+                if (r.getName().equalsIgnoreCase(readerName)) {
+                    try {
+                        Session session = r.openSession();
+                        passthroughController = new ApduPassthroughController(session);
+                        AppLog.i("PassthroughHceService: OMAPI session ready on " + readerName);
+                    } catch (IOException e) {
+                        AppLog.e("PassthroughHceService: failed to open session", e);
+                        active = false;
+                    }
+                    return;
+                }
             }
+            AppLog.e("PassthroughHceService: reader not found: " + readerName);
+            active = false;
         });
     }
 
-    public void stopPassthrough() {
+    private void stopPassthrough() {
         active = false;
-        omapiManager.disconnect();
+        tearDownOmapi();
         setObserveMode(true);
-        AppLog.i("PassthroughHceService: stopped passthrough");
+        AppLog.i("PassthroughHceService: stopped");
     }
 
-    /**
-     * Toggle observe mode via CardEmulation.setShouldDefaultToObserveModeForService (API 35).
-     * HostApduService does not expose setObserveModeEnabled(); this is the correct approach.
-     */
+    /** Toggle observe mode via the API 35 CardEmulation method. */
     private void setObserveMode(boolean enable) {
         NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
         if (nfcAdapter == null) return;
@@ -111,62 +134,31 @@ public class PassthroughHceService extends HostApduService {
     }
 
     /**
-     * Returns null to signal async processing; the actual response is sent via sendResponseApdu()
-     * from the OMAPI executor thread. This avoids blocking the main thread during SE I/O.
+     * Returns null to signal asynchronous processing; the actual response is sent via
+     * sendResponseApdu() from the apduExecutor thread to avoid blocking the NFC thread
+     * during potentially slow SE I/O.
      */
     @Override
     public byte[] processCommandApdu(byte[] apdu, Bundle extras) {
-        if (apdu == null || apdu.length < 4) {
-            return SW_INTERNAL_ERROR;
-        }
+        if (apdu == null || apdu.length < 4) return SW_INTERNAL_ERROR;
         AppLog.d("PassthroughHceService: APDU -> " + bytesToHex(apdu));
-
-        final byte[] apduCopy = Arrays.copyOf(apdu, apdu.length);
+        final byte[] copy = Arrays.copyOf(apdu, apdu.length);
         apduExecutor.execute(() -> {
-            byte[] response = dispatchApdu(apduCopy);
+            byte[] response = dispatchApdu(copy);
             sendResponseApdu(response);
         });
-        // null = response will be sent asynchronously via sendResponseApdu()
-        return null;
+        return null; // async — response sent via sendResponseApdu()
     }
 
     private byte[] dispatchApdu(byte[] apdu) {
-        // SELECT AID: CLA=00 INS=A4 P1=04
-        if (apdu[0] == 0x00 && apdu[1] == (byte) 0xA4 && apdu[2] == 0x04) {
-            return handleSelect(apdu);
+        if (passthroughController == null) {
+            AppLog.e("PassthroughHceService: APDU received but OMAPI session not ready");
+            return SW_INTERNAL_ERROR;
         }
-        return forwardApdu(apdu);
-    }
-
-    private byte[] handleSelect(byte[] apdu) {
-        if (apdu.length < 6) {
-            return SW_FILE_NOT_FOUND;
-        }
-        int aidLen = apdu[4] & 0xFF;
-        if (apdu.length < 5 + aidLen) {
-            return SW_FILE_NOT_FOUND;
-        }
-        byte[] aid = Arrays.copyOfRange(apdu, 5, 5 + aidLen);
-        AppLog.i("PassthroughHceService: SELECT AID=" + bytesToHex(aid));
         try {
-            byte[] selectResponse = omapiManager.openChannel(aid);
-            if (selectResponse == null || selectResponse.length == 0) {
-                return SW_OK;
-            }
-            return selectResponse;
+            return passthroughController.process(apdu);
         } catch (IOException e) {
-            AppLog.e("PassthroughHceService: SELECT failed", e);
-            return SW_FILE_NOT_FOUND;
-        }
-    }
-
-    private byte[] forwardApdu(byte[] apdu) {
-        try {
-            byte[] response = omapiManager.transmit(apdu);
-            AppLog.d("PassthroughHceService: APDU <- " + bytesToHex(response));
-            return response;
-        } catch (IOException e) {
-            AppLog.e("PassthroughHceService: transmit failed", e);
+            AppLog.e("PassthroughHceService: APDU error", e);
             return SW_INTERNAL_ERROR;
         }
     }
@@ -174,19 +166,36 @@ public class PassthroughHceService extends HostApduService {
     @Override
     public void onDeactivated(int reason) {
         AppLog.i("PassthroughHceService: deactivated reason=" + reason);
-        omapiManager.closeChannel();
+        // Close channel but keep the session alive for the next transaction.
+        if (passthroughController != null) {
+            passthroughController.closeCurrentChannel();
+        }
         if (active) {
-            // Re-enter observe mode so we can detect the next reader interaction.
+            // Re-enter observe mode so we can detect the next reader approach.
             setObserveMode(true);
+        }
+    }
+
+    private void tearDownOmapi() {
+        if (passthroughController != null) {
+            passthroughController.close();
+            passthroughController = null;
+        }
+        if (seService != null && seService.isConnected()) {
+            seService.shutdown();
+            seService = null;
+        }
+        if (seExecutor != null) {
+            seExecutor.shutdown();
+            seExecutor = null;
         }
     }
 
     private static String bytesToHex(byte[] bytes) {
         if (bytes == null) return "null";
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02X", b));
-        }
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) sb.append(String.format("%02X", b));
         return sb.toString();
     }
 }
+
