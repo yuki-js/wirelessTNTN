@@ -8,7 +8,7 @@
   "containerEnv": {
     "ANDROID_SDK_ROOT": "/opt/android-sdk",
     "ANDROID_HOME": "/opt/android-sdk",
-    "JAVA_HOME": "/usr/lib/jvm/temurin-17-amd64",
+    "JAVA_HOME": "/usr/lib/jvm/temurin-17-jdk-amd64",
     "GRADLE_USER_HOME": "/home/user/.gradle",
     "DISPLAY": "${localEnv:DISPLAY}",
     "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",

@@ -27,8 +27,7 @@ RUN apt-get update \
         gnupg \
     && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
         | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg \
-    && . /etc/os-release \
-    && echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb ${VERSION_CODENAME:-noble} main" \
+    && echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb bookworm main" \
         > /etc/apt/sources.list.d/adoptium.list \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -56,7 +55,7 @@ RUN apt-get update \
 
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
 ENV ANDROID_HOME=/opt/android-sdk
-ENV JAVA_HOME=/usr/lib/jvm/temurin-17-amd64
+ENV JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
 ENV PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/35.0.0:$PATH"
 
 COPY --from=download --chown=user:user /opt/android-sdk/cmdline-tools/latest /opt/android-sdk/cmdline-tools/latest
