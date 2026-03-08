@@ -397,11 +397,17 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
 
             try {
                 // ── Check NCI version ─────────────────────────────────────────────
-                // The empty-AID catch-all mechanism requires NCI 2.0+.
-                // NfcService.getNciVersion() returns the negotiated NCI version byte.
-                // On Android 15 hardware NCI 2.0 (0x20) is standard; NCI 1.0 is rare.
-                // If NCI 1.0 is detected we log a warning but still attempt the hook
-                // (worst case: the empty entry is ignored and routing is unchanged).
+                // The empty-AID catch-all mechanism (empty AID "" with PREFIX qualifier)
+                // is an NCI 2.0 feature (NFC Controller Interface spec §7.4).
+                // NCI 1.0 does not define this semantic — passing a null-byte-array AID
+                // to the NCI hardware (which is how "" maps) has undefined behavior and
+                // may crash the NFC controller driver.
+                //
+                // AOSP itself only adds the empty-AID entry when NCI >= 2.0
+                // (AidRoutingManager.configureRouting(), line 446).
+                //
+                // We enforce the same guard: if NCI < 2.0, skip the substitution and
+                // let the original commit() proceed unmodified.
                 try {
                     Class<?> nfcServiceClass =
                             aidRoutingManager.getClass().getClassLoader()
@@ -411,12 +417,17 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
                     Method getNciVersion = nfcServiceClass.getMethod("getNciVersion");
                     int nciVersion = (int) getNciVersion.invoke(nfcService);
                     if (nciVersion < NCI_VERSION_2_0) {
-                        XposedBridge.log("LmrtHijackModule: WARNING NCI version " +
-                                Integer.toHexString(nciVersion) + " < 2.0; " +
-                                "empty-AID catch-all may not be supported");
+                        XposedBridge.log("LmrtHijackModule: NCI " +
+                                Integer.toHexString(nciVersion)
+                                + " < 2.0 — empty-AID catch-all not supported;"
+                                + " skipping commit() override");
+                        return;  // abort: leave routing unchanged on NCI 1.0
                     }
-                } catch (Throwable ignored) {
-                    // NCI version check is best-effort.
+                } catch (Throwable t) {
+                    // If we cannot determine the NCI version, be conservative and proceed —
+                    // Android 15 devices are overwhelmingly NCI 2.0+.
+                    XposedBridge.log("LmrtHijackModule: could not determine NCI version ("
+                            + t + "), proceeding with override");
                 }
 
                 // ── Load AidEntry inner class ─────────────────────────────────────
@@ -436,6 +447,12 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
                 //   int aidInfo      — AID_ROUTE_QUAL_PREFIX = 0x10 (prefix qualifier)
                 //                      Combined with empty AID "" this means "match ALL"
                 //   int power        — POWER_STATE_ALL = 0x3F (active in every power mode)
+                //
+                // NCI AID routing priority (highest to lowest):
+                //   1. AID-based entries  ← our "" PREFIX entry catches everything here
+                //   2. Protocol-based entries (ISO-DEP protocol route)
+                //   3. Technology-based entries (NFC-A, NFC-B technology route)
+                // Our catch-all overrides whatever protocol/technology routes are set.
                 Object aidEntry = aidEntryCtor.newInstance(aidRoutingManager);
                 XposedHelpers.findField(aidEntryClass, "isOnHost").set(aidEntry, true);
                 XposedHelpers.findField(aidEntryClass, "route").set(aidEntry, ROUTE_HOST);
@@ -448,6 +465,11 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
                 // to call NfcService.routeAids() for each entry.
                 // We replace it with our single catch-all entry.
                 // The original method then runs with our modified argument.
+                //
+                // Note: NfcService.routeAids("", ...) calls hexStringToBytes("") → null,
+                // then mDeviceHost.routeAid(null, route, aidInfo, power).  AOSP itself
+                // follows this path for the empty AID (NCI 2.0 catch-all), so the native
+                // HAL is expected to handle null-byte-array as "empty AID".
                 HashMap newRouteCache = new HashMap();
                 newRouteCache.put("", aidEntry);   // empty AID "" = catch-all prefix
                 param.args[0] = newRouteCache;

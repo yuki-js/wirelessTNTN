@@ -22,9 +22,8 @@ import android.nfc.cardemulation.PollingFrame;
 import android.os.Bundle;
 
 import java.io.FileDescriptor;
-import java.io.PrintWriter;
+import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 
 public interface DeviceHost {
     public interface DeviceHostListener {
@@ -48,32 +47,9 @@ public interface DeviceHost {
 
         public void onPollingLoopDetected(List<PollingFrame> pollingFrames);
 
-        public void onObserveModeEnabledInFirmware();
-
-        public void onObserveModeDisabledInFirmware(PollingFrame exitFrame);
-
         public void onWlcStopped(int wpt_end_condition);
 
-        public void onTagRfDiscovered(boolean discovered);
-
         public void onVendorSpecificEvent(int gid, int oid, byte[] payload);
-
-        public void onObserveModeStateChanged(boolean enable);
-
-        public void onRfDiscoveryEvent(boolean isDiscoveryStarted);
-
-        public void onEeListenActivated(boolean isActivated);
-
-        public void onSeSelected(int type);
-
-        public void onCommandTimeout();
-
-        public void onEndpointRemoved(int reason);
-
-        /**
-         * On Restart Rf Discovery
-         */
-        void onRestartRfDiscovery();
     }
 
     public interface TagEndpoint {
@@ -86,8 +62,6 @@ public interface DeviceHost {
         void startPresenceChecking(int presenceCheckDelay,
                                    @Nullable TagDisconnectedCallback callback);
         void stopPresenceChecking();
-        boolean isPresenceCheckStopped();
-        void prepareForRemovalDetectionMode();
 
         int[] getTechList();
         void removeTechnology(int tech); // TODO remove this one
@@ -162,8 +136,6 @@ public interface DeviceHost {
 
     public boolean initialize();
 
-    public void setPartialInitMode(int mode);
-
     public boolean deinitialize();
 
     public String getName();
@@ -178,59 +150,7 @@ public interface DeviceHost {
 
     public boolean unrouteAid(byte[] aid);
 
-    public int commitRouting();
-
-    /**
-     * Get the T4T Nfcee power state supported.
-     * @return T4T Nfcee power state
-     */
-    int getT4TNfceePowerState();
-
-    /**
-     * Get the NDEF NFCEE Route ID.
-     * @return NDEF NFCEE Route ID
-     */
-    int getNdefNfceeRouteId();
-
-    /**
-     * Write the data into the NDEF NFCEE file of the specific file ID
-     * @param fileId file id to write to
-     * @param data data to write
-     * @return number of data bytes written
-     */
-    int doWriteData(byte[] fileId, byte[] data);
-
-    /**
-     * Read the data from the NDEF NFCEE file of the specific file ID.
-     * @param fileId file id to read from
-     * @return read data buffer
-     */
-    byte[] doReadData(byte[] fileId);
-
-    /**
-     * This API will set all the NFCEE NDEF data to zero.
-     * @return "True" when operation is successful. else "False"
-     */
-    boolean doClearNdefData();
-
-    /**
-     * This API will get NDEF NFCEE status.
-     * @return Indicates whether NDEF NFCEE Read or write operation is under process
-     *         Return "True" when operation is in progress. else "False"
-     */
-    boolean isNdefOperationOngoing();
-
-    /**
-     * This API will tell whether NDEF NFCEE emulation is supported or not.
-     * @return "True" when feature supported. else "False"
-     */
-    boolean isNdefNfceeEmulationSupported();
-
-    /**
-     * This API will tell whether T4T_NFCEE_ENABLE is declared in the HAL configuration file.
-     * @return "True" when declare, else "False"
-     */
-    boolean isNdefNfceefeatureEnabled();
+    public boolean commitRouting();
 
     public void registerT3tIdentifier(byte[] t3tIdentifier);
 
@@ -256,7 +176,7 @@ public interface DeviceHost {
 
     boolean getExtendedLengthApdusSupported();
 
-    void dump(PrintWriter pw, FileDescriptor fd);
+    void dump(FileDescriptor fd);
 
     public void doSetScreenState(int screen_state_mask, boolean alwaysPoll);
 
@@ -272,19 +192,11 @@ public interface DeviceHost {
 
     public boolean setNfcSecure(boolean enable);
 
-    public boolean isReaderModeAnnotationSupported();
-
     public boolean isObserveModeSupported();
 
     public boolean setObserveMode(boolean enable);
 
     public boolean isObserveModeEnabled();
-
-    public boolean isFirmwareExitFramesSupported();
-
-    public int getNumberOfFirmwareExitFramesSupported();
-
-    public boolean setFirmwareExitFrameTable(ExitFrame[] exitFrames, byte[] timeoutMs);
 
     /**
     * Get the committed listen mode routing configuration
@@ -314,11 +226,7 @@ public interface DeviceHost {
     boolean isMultiTag();
 
     void setIsoDepProtocolRoute(int route);
-    /**
-    * Set NFCC technology routing for ABF listening
-    */
-    void setTechnologyABFRoute(int route, int felicaRoute);
-    void setSystemCodeRoute(int route);
+    void setTechnologyABRoute(int route);
     void clearRoutingEntry(int clearFlags);
 
     /**
@@ -329,20 +237,7 @@ public interface DeviceHost {
     /**
      * Sends Vendor NCI command
      */
-
     NfcVendorNciResponse sendRawVendorCmd(int mt, int gid, int oid, byte[] payload);
 
-    public boolean detectEpRemoval(int waiting_time_int);
-
     void enableVendorNciNotifications(boolean enabled);
-
-    /**
-     * Get the active NFCEE list
-     */
-    public Map<String, Integer> dofetchActiveNfceeList();
-    public boolean isRemovalDetectionInPollModeSupported();
-    /**
-     * Restarts RF Discovery
-     */
-    void restartRfDiscovery();
 }
