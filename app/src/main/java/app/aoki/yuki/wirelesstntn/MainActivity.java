@@ -1,6 +1,5 @@
 package app.aoki.yuki.wirelesstntn;
 
-import android.annotation.SuppressLint;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.nfc.NfcAdapter;
@@ -23,24 +22,23 @@ import java.util.concurrent.Executors;
 /**
  * Main activity: SE reader selector, Start/Stop toggle, log viewer.
  *
- * Foreground-only operation:
- *   - setPreferredService() is called in onResume() when a session is active,
- *     making our HCE service the preferred target for NFC routing while this
- *     activity is in the foreground.
- *   - unsetPreferredService() is called in onPause() so the service is no longer
- *     preferred when the app goes to the background.
+ * Requirements
+ * ------------
+ *   - Root access and LSPosed framework installed.
+ *   - This app enabled as an LSPosed module with scope set to com.android.nfc.
+ *   - LmrtHijackModule then hooks RegisteredAidCache.resolveAid() inside the
+ *     NFC process, redirecting all AID SELECTs to PassthroughHceService.
  *
- * AID routing:
- *   AIDs are declared statically in res/xml/apduservice.xml.  No dynamic registration
- *   is needed: Observer Mode (shouldDefaultToObserveMode="true") captures every NFC
- *   polling frame before AID selection occurs, and the service only exits observe mode
- *   once the OMAPI session is ready.  The SE then decides per-AID whether to accept
- *   the transaction; Android's AID routing table is just the mechanism by which the
- *   NFC stack dispatches incoming SELECT commands to our service.
+ * Foreground preferred service
+ * ----------------------------
+ *   setPreferredService() is called in onResume() when a session is active, so
+ *   that standard AID routing (without relying on the Xposed hook) also prefers
+ *   our service while this activity is in the foreground.
+ *   unsetPreferredService() is called in onPause() to release the preference.
  *
- * @see ref_aosp/NfcNci/testutils/src/com/android/nfc/emulator/BaseEmulatorActivity.java
+ * No Observer Mode is used. The Xposed hook replaces the role that observe mode
+ * served in the previous implementation.
  */
-@SuppressLint("NewApi")
 public class MainActivity extends AppCompatActivity {
 
     private Spinner seSpinner;
@@ -56,10 +54,10 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        seSpinner      = findViewById(R.id.se_spinner);
+        seSpinner       = findViewById(R.id.se_spinner);
         startStopButton = findViewById(R.id.start_stop_button);
-        logTextView    = findViewById(R.id.log_text_view);
-        logScrollView  = findViewById(R.id.log_scroll_view);
+        logTextView     = findViewById(R.id.log_text_view);
+        logScrollView   = findViewById(R.id.log_scroll_view);
 
         NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
         if (nfcAdapter != null) {
@@ -77,11 +75,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Refresh the SE reader list every time the user returns to the app.
+        // Refresh the SE reader list whenever the user returns to the app.
         loadSeReaders();
 
-        // If a session is active, re-register as the preferred foreground service so that
-        // polling frames and APDUs continue to route to our service.
+        // While the activity is in the foreground, make our service the preferred
+        // foreground service so standard HCE routing (no hook) also works.
         if (sessionActive && cardEmulation != null) {
             cardEmulation.setPreferredService(this,
                     new ComponentName(this, PassthroughHceService.class));
@@ -91,8 +89,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        // Foreground-only: unregister as preferred service when leaving the foreground.
-        // The NFC system will no longer route traffic to our service while backgrounded.
+        // Release the preferred-service preference when leaving the foreground.
         if (cardEmulation != null) {
             cardEmulation.unsetPreferredService(this);
         }
@@ -104,9 +101,13 @@ public class MainActivity extends AppCompatActivity {
         AppLog.setListener(null);
     }
 
+    // -------------------------------------------------------------------------
+    // Session helpers
+    // -------------------------------------------------------------------------
+
     /**
-     * Connect to SEService, enumerate available readers, populate the spinner, then
-     * immediately shut down the transient SEService (we only needed the names).
+     * Queries the SEService for available readers, populates the spinner, then
+     * immediately shuts down the transient SEService (we only needed the names).
      */
     private void loadSeReaders() {
         try {
@@ -143,14 +144,13 @@ public class MainActivity extends AppCompatActivity {
         String readerName = (String) seSpinner.getSelectedItem();
         AppLog.i("Starting passthrough session, reader=" + readerName);
 
-        // Set as preferred foreground service — this is what makes our service receive
-        // polling frames while the activity is visible. Based on AOSP BaseEmulatorActivity.
+        // Register as preferred foreground service so the standard HCE routing
+        // (without the Xposed hook) also prefers our service.
         if (cardEmulation != null) {
             cardEmulation.setPreferredService(this,
                     new ComponentName(this, PassthroughHceService.class));
         }
 
-        // Start the HCE service (only now, not before the user presses Start).
         Intent intent = new Intent(this, PassthroughHceService.class);
         intent.setAction(PassthroughHceService.ACTION_START);
         intent.putExtra(PassthroughHceService.EXTRA_READER, readerName);
@@ -164,23 +164,25 @@ public class MainActivity extends AppCompatActivity {
     private void stopSession() {
         AppLog.i("Stopping passthrough session");
 
-        // Unregister as preferred foreground service.
         if (cardEmulation != null) {
             cardEmulation.unsetPreferredService(this);
         }
 
         Intent intent = new Intent(this, PassthroughHceService.class);
         intent.setAction(PassthroughHceService.ACTION_STOP);
-        startService(intent); // delivers ACTION_STOP via onStartCommand
+        startService(intent);
 
         sessionActive = false;
         seSpinner.setEnabled(true);
         startStopButton.setText(R.string.start);
     }
 
+    // -------------------------------------------------------------------------
+    // Log display
+    // -------------------------------------------------------------------------
+
     private void appendLog(String msg) {
         logTextView.append(msg + "\n");
         logScrollView.post(() -> logScrollView.fullScroll(ScrollView.FOCUS_DOWN));
     }
 }
-

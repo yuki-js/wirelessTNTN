@@ -34,4 +34,9 @@ configurations.all {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+
+    // XposedBridge API stubs (compile-time only).
+    // The real XposedBridge is injected at runtime by the LSPosed framework;
+    // this stub JAR is never packaged into the APK.
+    compileOnly fileTree(dir: 'libs', include: ['*.jar'])
 }

@@ -10,6 +10,19 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.WirelessTNTN">
 
+        <!--
+            LSPosed / Xposed module declarations.
+
+            xposedmodule   — marks this APK as an Xposed module
+            xposeddescription — human-readable description shown in the LSPosed UI
+            xposedminversion  — minimum XposedBridge API version required (82 = Art-based)
+            xposedscope       — which processes this module hooks (com.android.nfc)
+        -->
+        <meta-data android:name="xposedmodule"      android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="Hijacks NFC LMRT to route all AIDs to PassthroughHceService" />
+        <meta-data android:name="xposedminversion"  android:value="82" />
+        <meta-data android:name="xposedscope"       android:resource="@array/xposed_scope" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
