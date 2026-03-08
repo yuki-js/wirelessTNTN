@@ -1,49 +1,39 @@
 package app.aoki.yuki.wirelesstntn;
 
-import android.annotation.SuppressLint;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.nfc.NfcAdapter;
 import android.nfc.cardemulation.CardEmulation;
 import android.os.Bundle;
-import android.se.omapi.Reader;
-import android.se.omapi.SEService;
-import android.widget.ArrayAdapter;
+import android.text.TextUtils;
+import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
 
 /**
- * Main activity: SE reader selector, Start/Stop toggle, log viewer.
+ * Main activity: AID list editor, Start/Stop toggle, log viewer.
+ *
+ * The user enters one or more AIDs (exact or prefix with trailing '*') in the list.
+ * When Start is pressed those AIDs are registered dynamically via
+ * CardEmulation.registerAidsForService() and the HCE service is started.
  *
  * Foreground-only operation:
- *   - setPreferredService() is called in onResume() when a session is active,
- *     making our HCE service the preferred target for NFC routing while this
- *     activity is in the foreground.
- *   - unsetPreferredService() is called in onPause() so the service is no longer
- *     preferred when the app goes to the background.
- *
- * AID routing:
- *   AIDs are declared statically in res/xml/apduservice.xml.  No dynamic registration
- *   is needed: Observer Mode (shouldDefaultToObserveMode="true") captures every NFC
- *   polling frame before AID selection occurs, and the service only exits observe mode
- *   once the OMAPI session is ready.  The SE then decides per-AID whether to accept
- *   the transaction; Android's AID routing table is just the mechanism by which the
- *   NFC stack dispatches incoming SELECT commands to our service.
- *
- * @see ref_aosp/NfcNci/testutils/src/com/android/nfc/emulator/BaseEmulatorActivity.java
+ *   - setPreferredService() is called in onResume() when a session is active.
+ *   - unsetPreferredService() is called in onPause().
  */
-@SuppressLint("NewApi")
 public class MainActivity extends AppCompatActivity {
 
-    private Spinner seSpinner;
+    private LinearLayout aidListContainer;
+    private Button addAidButton;
     private Button startStopButton;
     private TextView logTextView;
     private ScrollView logScrollView;
@@ -56,32 +46,32 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        seSpinner      = findViewById(R.id.se_spinner);
-        startStopButton = findViewById(R.id.start_stop_button);
-        logTextView    = findViewById(R.id.log_text_view);
-        logScrollView  = findViewById(R.id.log_scroll_view);
+        aidListContainer = findViewById(R.id.aid_list_container);
+        addAidButton     = findViewById(R.id.add_aid_button);
+        startStopButton  = findViewById(R.id.start_stop_button);
+        logTextView      = findViewById(R.id.log_text_view);
+        logScrollView    = findViewById(R.id.log_scroll_view);
 
         NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
         if (nfcAdapter != null) {
             cardEmulation = CardEmulation.getInstance(nfcAdapter);
         }
 
+        addAidButton.setOnClickListener(v -> addAidRow(""));
         startStopButton.setOnClickListener(v -> {
             if (sessionActive) stopSession();
             else               startSession();
         });
 
         AppLog.setListener(msg -> runOnUiThread(() -> appendLog(msg)));
+
+        // Start with one empty AID row.
+        addAidRow("");
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // Refresh the SE reader list every time the user returns to the app.
-        loadSeReaders();
-
-        // If a session is active, re-register as the preferred foreground service so that
-        // polling frames and APDUs continue to route to our service.
         if (sessionActive && cardEmulation != null) {
             cardEmulation.setPreferredService(this,
                     new ComponentName(this, PassthroughHceService.class));
@@ -91,8 +81,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        // Foreground-only: unregister as preferred service when leaving the foreground.
-        // The NFC system will no longer route traffic to our service while backgrounded.
         if (cardEmulation != null) {
             cardEmulation.unsetPreferredService(this);
         }
@@ -105,76 +93,117 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Connect to SEService, enumerate available readers, populate the spinner, then
-     * immediately shut down the transient SEService (we only needed the names).
+     * Add one AID input row (EditText + remove button) to the list container.
+     *
+     * @param initialValue pre-fill value (empty string for a blank row)
      */
-    private void loadSeReaders() {
-        try {
-            SEService[] holder = new SEService[1];
-            java.util.concurrent.ExecutorService listExecutor = Executors.newSingleThreadExecutor();
-            holder[0] = new SEService(this, listExecutor, () -> {
-                Reader[] readers = holder[0].getReaders();
-                List<String> names = new ArrayList<>();
-                for (Reader r : readers) names.add(r.getName());
-                holder[0].shutdown();
-                listExecutor.shutdown();
-                runOnUiThread(() -> {
-                    if (names.isEmpty()) {
-                        AppLog.e("No Secure Element readers found on this device");
-                        return;
+    private void addAidRow(String initialValue) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        EditText editText = new EditText(this);
+        LinearLayout.LayoutParams etParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        editText.setLayoutParams(etParams);
+        editText.setHint(R.string.aid_hint);
+        editText.setSingleLine(true);
+        if (!TextUtils.isEmpty(initialValue)) {
+            editText.setText(initialValue);
+        }
+        editText.setEnabled(!sessionActive);
+
+        Button removeButton = new Button(this);
+        removeButton.setText("−");
+        removeButton.setContentDescription(getString(R.string.remove_aid_button));
+        removeButton.setGravity(Gravity.CENTER);
+        removeButton.setOnClickListener(v -> {
+            // Keep at least one row so the user always has a field to type in.
+            if (aidListContainer.getChildCount() > 1) {
+                aidListContainer.removeView(row);
+            } else {
+                editText.setText("");
+            }
+        });
+
+        row.addView(editText);
+        row.addView(removeButton);
+        aidListContainer.addView(row);
+    }
+
+    /** Collect all non-empty AID strings from the list. */
+    private List<String> collectAids() {
+        List<String> aids = new ArrayList<>();
+        for (int i = 0; i < aidListContainer.getChildCount(); i++) {
+            View child = aidListContainer.getChildAt(i);
+            if (child instanceof LinearLayout) {
+                View first = ((LinearLayout) child).getChildAt(0);
+                if (first instanceof EditText) {
+                    String text = ((EditText) first).getText().toString().trim();
+                    if (!text.isEmpty()) {
+                        aids.add(text);
                     }
-                    ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-                            android.R.layout.simple_spinner_item, names);
-                    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-                    seSpinner.setAdapter(adapter);
-                    AppLog.i("SE readers available: " + names);
-                });
-            });
-        } catch (Exception e) {
-            AppLog.e("Failed to query Secure Element readers: " + e.getMessage());
+                }
+            }
+        }
+        return aids;
+    }
+
+    private void setAidRowsEnabled(boolean enabled) {
+        for (int i = 0; i < aidListContainer.getChildCount(); i++) {
+            View child = aidListContainer.getChildAt(i);
+            if (child instanceof LinearLayout) {
+                View first = ((LinearLayout) child).getChildAt(0);
+                if (first instanceof EditText) {
+                    first.setEnabled(enabled);
+                }
+            }
         }
     }
 
     private void startSession() {
-        if (seSpinner.getCount() == 0) {
-            AppLog.e("No Secure Element reader available");
+        List<String> aids = collectAids();
+        if (aids.isEmpty()) {
+            AppLog.e("No AIDs configured — add at least one AID before starting");
             return;
         }
-        String readerName = (String) seSpinner.getSelectedItem();
-        AppLog.i("Starting passthrough session, reader=" + readerName);
 
-        // Set as preferred foreground service — this is what makes our service receive
-        // polling frames while the activity is visible. Based on AOSP BaseEmulatorActivity.
+        AppLog.i("Starting HCE session, AIDs=" + aids);
+
+        // Register AIDs dynamically for the HCE service.
         if (cardEmulation != null) {
-            cardEmulation.setPreferredService(this,
-                    new ComponentName(this, PassthroughHceService.class));
+            ComponentName svc = new ComponentName(this, PassthroughHceService.class);
+            boolean ok = cardEmulation.registerAidsForService(svc, CardEmulation.CATEGORY_OTHER, aids);
+            AppLog.i("registerAidsForService: " + ok + "  AIDs=" + aids);
+            cardEmulation.setPreferredService(this, svc);
         }
 
-        // Start the HCE service (only now, not before the user presses Start).
         Intent intent = new Intent(this, PassthroughHceService.class);
         intent.setAction(PassthroughHceService.ACTION_START);
-        intent.putExtra(PassthroughHceService.EXTRA_READER, readerName);
         startService(intent);
 
         sessionActive = true;
-        seSpinner.setEnabled(false);
+        addAidButton.setEnabled(false);
+        setAidRowsEnabled(false);
         startStopButton.setText(R.string.stop);
     }
 
     private void stopSession() {
-        AppLog.i("Stopping passthrough session");
+        AppLog.i("Stopping HCE session");
 
-        // Unregister as preferred foreground service.
         if (cardEmulation != null) {
             cardEmulation.unsetPreferredService(this);
         }
 
         Intent intent = new Intent(this, PassthroughHceService.class);
         intent.setAction(PassthroughHceService.ACTION_STOP);
-        startService(intent); // delivers ACTION_STOP via onStartCommand
+        startService(intent);
 
         sessionActive = false;
-        seSpinner.setEnabled(true);
+        addAidButton.setEnabled(true);
+        setAidRowsEnabled(true);
         startStopButton.setText(R.string.start);
     }
 
@@ -183,4 +212,3 @@ public class MainActivity extends AppCompatActivity {
         logScrollView.post(() -> logScrollView.fullScroll(ScrollView.FOCUS_DOWN));
     }
 }
-

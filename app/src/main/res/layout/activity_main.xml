@@ -9,14 +9,29 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/se_selector_label"
+        android:text="@string/aid_list_label"
         android:textAppearance="?android:attr/textAppearanceMedium" />
 
-    <Spinner
-        android:id="@+id/se_spinner"
+    <ScrollView
+        android:id="@+id/aid_list_scroll"
         android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginBottom="4dp">
+
+        <LinearLayout
+            android:id="@+id/aid_list_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <Button
+        android:id="@+id/add_aid_button"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="8dp"
+        android:text="@string/add_aid_button" />
 
     <Button
         android:id="@+id/start_stop_button"
