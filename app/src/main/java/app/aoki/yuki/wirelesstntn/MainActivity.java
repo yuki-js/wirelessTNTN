@@ -17,7 +17,6 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
 
@@ -31,13 +30,18 @@ import java.util.concurrent.Executors;
  *   - unsetPreferredService() is called in onPause() so the service is no longer
  *     preferred when the app goes to the background.
  *
+ * AID routing:
+ *   AIDs are declared statically in res/xml/apduservice.xml.  No dynamic registration
+ *   is needed: Observer Mode (shouldDefaultToObserveMode="true") captures every NFC
+ *   polling frame before AID selection occurs, and the service only exits observe mode
+ *   once the OMAPI session is ready.  The SE then decides per-AID whether to accept
+ *   the transaction; Android's AID routing table is just the mechanism by which the
+ *   NFC stack dispatches incoming SELECT commands to our service.
+ *
  * @see ref_aosp/NfcNci/testutils/src/com/android/nfc/emulator/BaseEmulatorActivity.java
  */
 @SuppressLint("NewApi")
 public class MainActivity extends AppCompatActivity {
-
-    // Catch-all AID prefixes; registered dynamically so the service is never active unintentionally.
-    private static final List<String> AID_FILTERS = Arrays.asList("A0*", "F0*");
 
     private Spinner seSpinner;
     private Button startStopButton;
@@ -139,9 +143,6 @@ public class MainActivity extends AppCompatActivity {
         String readerName = (String) seSpinner.getSelectedItem();
         AppLog.i("Starting passthrough session, reader=" + readerName);
 
-        // Register AID filters so Android routes NFC frames to our service.
-        registerAids();
-
         // Set as preferred foreground service — this is what makes our service receive
         // polling frames while the activity is visible. Based on AOSP BaseEmulatorActivity.
         if (cardEmulation != null) {
@@ -163,8 +164,6 @@ public class MainActivity extends AppCompatActivity {
     private void stopSession() {
         AppLog.i("Stopping passthrough session");
 
-        unregisterAids();
-
         // Unregister as preferred foreground service.
         if (cardEmulation != null) {
             cardEmulation.unsetPreferredService(this);
@@ -177,19 +176,6 @@ public class MainActivity extends AppCompatActivity {
         sessionActive = false;
         seSpinner.setEnabled(true);
         startStopButton.setText(R.string.start);
-    }
-
-    private void registerAids() {
-        if (cardEmulation == null) { AppLog.e("NFC adapter not available"); return; }
-        ComponentName cn = new ComponentName(this, PassthroughHceService.class);
-        boolean ok = cardEmulation.registerAidsForService(cn, CardEmulation.CATEGORY_OTHER, AID_FILTERS);
-        AppLog.i("registerAidsForService=" + ok);
-    }
-
-    private void unregisterAids() {
-        if (cardEmulation == null) return;
-        ComponentName cn = new ComponentName(this, PassthroughHceService.class);
-        cardEmulation.removeAidsForService(cn, CardEmulation.CATEGORY_OTHER);
     }
 
     private void appendLog(String msg) {
