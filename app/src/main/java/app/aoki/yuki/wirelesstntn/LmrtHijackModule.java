@@ -257,7 +257,8 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
                     ComponentName ourComponent =
                             ComponentName.unflattenFromString(OUR_PACKAGE + "/" + OUR_SERVICE);
                     for (Object svcInfo : returnedList) {
-                        if (ourComponent.equals(getComponent(svcInfo))) {
+                        ComponentName c = getComponent(svcInfo);
+                        if (c != null && ourComponent.equals(c)) {
                             // Already present (e.g. the user added a minimal apduservice.xml).
                             return;
                         }
@@ -567,8 +568,9 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
             for (List serviceList : userApduServiceInfoMap.values()) {
                 if (serviceList == null) continue;
                 for (Object serviceInfo : serviceList) {
-                    if (serviceInfo != null
-                            && ourComponent.equals(getComponent(serviceInfo))) {
+                    if (serviceInfo == null) continue;
+                    ComponentName c = getComponent(serviceInfo);
+                    if (c != null && ourComponent.equals(c)) {
                         return serviceInfo;
                     }
                 }
@@ -610,7 +612,9 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
                     List services = (List) servicesField.get(resolveInfoObj);
                     if (services != null) {
                         for (Object svc : services) {
-                            if (svc != null && ourComponent.equals(getComponent(svc))) {
+                            if (svc == null) continue;
+                            ComponentName c = getComponent(svc);
+                            if (c != null && ourComponent.equals(c)) {
                                 return svc;
                             }
                         }
