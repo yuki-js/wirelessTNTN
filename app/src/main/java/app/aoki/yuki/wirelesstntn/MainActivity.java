@@ -36,8 +36,47 @@ import java.util.concurrent.Executors;
 @SuppressLint("NewApi")
 public class MainActivity extends AppCompatActivity {
 
-    // Catch-all AID prefixes; registered dynamically so the service is never active unintentionally.
-    private static final List<String> AID_FILTERS = Arrays.asList("A0*", "F0*");
+    // AID prefix filters registered dynamically when the user presses Start, so the service is
+    // never active unintentionally.
+    //
+    // Android requires prefix AIDs to be at least 5 bytes (10 hex chars) before the trailing '*'.
+    // Shorter prefixes such as "A0*" are rejected by android.nfc.cardemulation.AidGroup with
+    // IllegalArgumentException, and would also never match in the NFC AID-routing table even
+    // if they were syntactically accepted (because '*' sorts before '0'-'F' in the NavigableMap
+    // range query used by RegisteredAidCache.resolveAid).
+    //
+    // The list below covers the major ISO 7816 application families found on Secure Elements:
+    //   A0 xx xx xx xx  – ISO-registered application identifiers (payment, transit, identity …)
+    //   F0 xx xx xx xx  – Proprietary application identifiers
+    //
+    // AIDs that do not match any of these prefixes will not be routed to this service.
+    private static final List<String> AID_FILTERS = Arrays.asList(
+            // --- Payment networks ---
+            "A000000003*",  // Visa
+            "A000000004*",  // Mastercard / Maestro
+            "A000000025*",  // American Express
+            "A000000029*",  // American Express (alternate RID)
+            "A000000032*",  // Visa Electron
+            "A000000045*",  // Maestro (UK Domestic)
+            "A000000065*",  // JCB
+            "A000000152*",  // Discover / Diners Club
+            "A000000277*",  // Interac
+            "A000000333*",  // China UnionPay
+            "A000000632*",  // eftpos Australia
+            "A000000658*",  // MIR (Russia)
+            "A000000724*",  // RuPay (India / NPCI)
+            "A000000006*",  // Bancontact / Mister Cash
+            "A000000042*",  // Carte Bancaire (CB)
+            "A000000172*",  // Girocard (Germany)
+            // --- Transit / transport ---
+            "A000000031*",  // Visa Transit
+            "A000000046*",  // Visa Transit (alternate)
+            // --- Proprietary F0 range ---
+            "F000000000*",  // Proprietary (F0 00 00 00 00)
+            "F000000001*",  // Proprietary (F0 00 00 00 01)
+            "F000000002*",  // Proprietary (F0 00 00 00 02)
+            "F000000003*"   // Proprietary (F0 00 00 00 03)
+    );
 
     private Spinner seSpinner;
     private Button startStopButton;

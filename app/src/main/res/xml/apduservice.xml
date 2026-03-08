@@ -7,9 +7,13 @@
     automatically. Polling frames are delivered via processPollingFrames(); the service then
     calls NfcAdapter.setObserveModeEnabled(false) to exit observe mode and accept a transaction.
 
-    The static AID group with a dummy AID ensures the service is recognized by the NFC routing
+    The static AID group with a dummy AID ensures the service is recognised by the NFC routing
     system even before dynamic AIDs are registered via registerAidsForService(). The actual
-    passthrough AID prefixes (A0*, F0*) are registered dynamically when the user presses Start.
+    passthrough AID prefixes (a set of valid 5-byte prefix AIDs covering common SE applications)
+    are registered dynamically when the user presses Start.
+
+    Note: Android requires prefix AIDs to be at least 5 bytes (10 hex chars) before the trailing
+    '*'. Shorter forms such as "A0*" are rejected with IllegalArgumentException.
 
     See ref_aosp/kormax_demo/apduservice.xml for the pattern.
     See ref_aosp/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java for
@@ -21,7 +25,7 @@
     android:shouldDefaultToObserveMode="true">
 
     <!-- Static AID group for baseline NFC routing recognition.
-         Dynamic AID prefixes (A0*, F0*) are registered at runtime on Start. -->
+         Dynamic AID prefixes (valid 5-byte prefix AIDs) are registered at runtime on Start. -->
     <aid-group android:description="@string/aiddescription" android:category="other">
         <aid-filter android:name="FFFFFFFFFF"/>
     </aid-group>
