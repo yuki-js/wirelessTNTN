@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
 
 env:
   DEVCONTAINER_IMAGE: ghcr.io/yuki-js/wirelesstntn-devcontainer:latest
@@ -37,5 +39,5 @@ jobs:
         with:
           context: .
           file: .devcontainer/Dockerfile
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ env.DEVCONTAINER_IMAGE }}
