@@ -32,6 +32,20 @@
             </intent-filter>
         </activity>
 
+        <!--
+            HCE service declaration — NO apduservice.xml meta-data.
+
+            RegisteredServicesCache normally requires an apduservice.xml to register
+            an HCE service.  Without it the framework throws XmlPullParserException
+            and silently skips the service (see RegisteredServicesCache.getInstalledServices).
+            LmrtHijackModule.InjectOurServiceHook compensates by injecting a synthetic
+            ApduServiceInfo for this service into getInstalledServices() at runtime, so
+            the service still appears in RegisteredAidCache.mUserApduServiceInfo.
+
+            The intent filter is kept so PackageManager can find the service for the
+            synthetic injection (and so the system can bind to it via HostApduService
+            SERVICE_INTERFACE when an AID SELECT is dispatched by HostEmulationManager).
+        -->
         <service
             android:name=".PassthroughHceService"
             android:exported="true"
@@ -39,9 +53,7 @@
             <intent-filter>
                 <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
             </intent-filter>
-            <meta-data
-                android:name="android.nfc.cardemulation.host_apdu_service"
-                android:resource="@xml/apduservice" />
+            <!-- No <meta-data> pointing to apduservice.xml — handled by Xposed hook -->
         </service>
     </application>
 </manifest>
