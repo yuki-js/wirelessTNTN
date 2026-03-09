@@ -1,10 +1,7 @@
 package app.aoki.yuki.wirelesstntn;
 
-import android.annotation.SuppressLint;
 import android.content.Intent;
-import android.nfc.NfcAdapter;
 import android.nfc.cardemulation.HostApduService;
-import android.nfc.cardemulation.PollingFrame;
 import android.os.Bundle;
 import android.se.omapi.Reader;
 import android.se.omapi.SEService;
@@ -12,34 +9,49 @@ import android.se.omapi.Session;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * NFC Host Card Emulation service that acts as a passthrough to a Secure Element via OMAPI.
+ * NFC Host Card Emulation service that passes every APDU through to the Secure Element via OMAPI.
  *
- * Observer Mode lifecycle (based on AOSP HostEmulationManager):
- *   1. Start → enable observe mode via NfcAdapter.setObserveModeEnabled(true)
- *   2. Reader polling frames arrive via processPollingFrames()
- *   3. Once OMAPI session is ready → NfcAdapter.setObserveModeEnabled(false) to accept transaction
- *   4. APDUs arrive via processCommandApdu() → forwarded through OMAPI
- *   5. Field lost → onDeactivated() → re-enable observe mode
- *   6. Repeat from 2
+ * How it fits into the system
+ * ---------------------------
+ * The NFC controller's Listener Mode Routing Table (LMRT) routes incoming AID SELECTs to the
+ * Device Host (DH). Android's HostEmulationManager then calls RegisteredAidCache.resolveAid()
+ * to pick which HCE service receives the APDUs.
  *
- * This service only operates when the user presses Start in the activity; the activity
- * registers itself as the preferred foreground service via CardEmulation.setPreferredService().
+ * LmrtHijackModule (an LSPosed/Xposed module running inside com.android.nfc) intercepts
+ * resolveAid() and always returns this service as the target. As a result, every AID that
+ * reaches the DH is delivered here, regardless of what is registered in apduservice.xml.
+ *
+ * apduservice.xml still lists many AID prefixes — those are the AIDs for which the LMRT has
+ * a DH route, so they are the AIDs that can be intercepted by the hook in the first place.
+ *
+ * APDU flow
+ * ---------
+ *   1. NFC reader taps → NFC controller → DH via LMRT
+ *   2. HostEmulationManager calls resolveAid() → (hooked) → this service
+ *   3. processCommandApdu() receives the SELECT AID
+ *   4. ApduPassthroughController opens an OMAPI logical channel for that AID
+ *   5. Subsequent APDUs forwarded through the same channel
+ *   6. Field lost → onDeactivated() → channel closed, ready for next reader
+ *
+ * This service is started (via ACTION_START) only when the user presses Start in MainActivity.
+ * It is a foreground-preferred service via CardEmulation.setPreferredService() so that
+ * standard AID routing (without the hook) also prefers this service while the activity is open.
+ *
+ * No Observer Mode is used. The Xposed hook replaces the role that observe mode served before.
  */
-@SuppressLint("NewApi")
 public class PassthroughHceService extends HostApduService {
 
-    static final String ACTION_START  = "app.aoki.yuki.wirelesstntn.START_PASSTHROUGH";
-    static final String ACTION_STOP   = "app.aoki.yuki.wirelesstntn.STOP_PASSTHROUGH";
-    static final String EXTRA_READER  = "reader_name";
+    static final String ACTION_START = "app.aoki.yuki.wirelesstntn.START_PASSTHROUGH";
+    static final String ACTION_STOP  = "app.aoki.yuki.wirelesstntn.STOP_PASSTHROUGH";
+    static final String EXTRA_READER = "reader_name";
 
     private static final byte[] SW_INTERNAL_ERROR = {0x6F, 0x00};
 
-    // Static instance — HostApduService.onBind() is final, cannot use ServiceConnection.
+    // Static instance — HostApduService.onBind() is final; cannot use ServiceConnection.
     private static volatile PassthroughHceService instance;
     public static PassthroughHceService getInstance() { return instance; }
 
@@ -47,30 +59,17 @@ public class PassthroughHceService extends HostApduService {
     private SEService seService;
     private ApduPassthroughController passthroughController;
 
-    private PollingFrameObserver pollingFrameObserver;
-    // Single-thread executor for OMAPI I/O (avoids blocking the NFC main thread).
+    // Single-thread executor for OMAPI I/O — avoids blocking the NFC thread during SE I/O.
     private final ExecutorService apduExecutor = Executors.newSingleThreadExecutor();
-    // Executor for SEService callbacks; stored so it can be shut down with the session.
+    // Executor used for SEService callbacks; stored so it can be shut down with the session.
     private ExecutorService seExecutor;
+
     private volatile boolean active = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
-        pollingFrameObserver = new PollingFrameObserver(new PollingFrameObserver.Callback() {
-            @Override
-            public void onReaderDetected() {
-                // Exit observe mode only after the OMAPI session is ready to handle APDUs.
-                // Uses NfcAdapter.setObserveModeEnabled(false) — the correct runtime toggle.
-                // (setShouldDefaultToObserveModeForService is a static preference, not a toggle.)
-                if (active && passthroughController != null) {
-                    AppLog.i("PassthroughHceService: reader detected, exiting observe mode");
-                    setObserveModeEnabled(false);
-                }
-            }
-            @Override public void onFrameLog(String description) {}
-        });
         AppLog.i("PassthroughHceService: created");
     }
 
@@ -96,11 +95,17 @@ public class PassthroughHceService extends HostApduService {
         super.onDestroy();
     }
 
+    // -------------------------------------------------------------------------
+    // Session lifecycle
+    // -------------------------------------------------------------------------
+
+    /**
+     * Opens the OMAPI session on the chosen Secure Element reader.
+     * Called when the user presses Start. APDUs arriving before the session is
+     * ready return SW_INTERNAL_ERROR (6F 00).
+     */
     private void startPassthrough(String readerName) {
         active = true;
-        // Enter observe mode; PollingFrameObserver calls setObserveModeEnabled(false)
-        // once a reader is detected and the OMAPI session is ready.
-        setObserveModeEnabled(true);
         AppLog.i("PassthroughHceService: connecting OMAPI, reader=" + readerName);
 
         seExecutor = Executors.newSingleThreadExecutor();
@@ -124,58 +129,39 @@ public class PassthroughHceService extends HostApduService {
         });
     }
 
+    /** Tears down the OMAPI session. Called when the user presses Stop. */
     private void stopPassthrough() {
         active = false;
         tearDownOmapi();
-        // Re-enable observe mode on stop so the NFC stack returns to passive observation.
-        setObserveModeEnabled(true);
         AppLog.i("PassthroughHceService: stopped");
     }
 
-    /**
-     * Toggle observe mode at runtime via NfcAdapter.setObserveModeEnabled() (API 35).
-     *
-     * This is the correct runtime toggle. setShouldDefaultToObserveModeForService() is a
-     * static preference stored by RegisteredServicesCache; the actual enable/disable is
-     * performed by NfcAdapter.setObserveModeEnabled() which propagates through NfcService
-     * to the NFC controller firmware.
-     *
-     * @see ref_aosp/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
-     *      (allowOneTransaction, updateForShouldDefaultToObserveMode)
-     * @see ref_aosp/NfcNci/testutils/src/com/android/nfc/emulator/BaseEmulatorActivity.java
-     *      (setObserveModeEnabled)
-     */
-    private void setObserveModeEnabled(boolean enable) {
-        NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
-        if (nfcAdapter == null) return;
-        boolean result = nfcAdapter.setObserveModeEnabled(enable);
-        AppLog.d("PassthroughHceService: setObserveModeEnabled(" + enable + ")=" + result);
-    }
-
-    @Override
-    public void processPollingFrames(List<PollingFrame> frames) {
-        pollingFrameObserver.onPollingFrames(frames);
-    }
+    // -------------------------------------------------------------------------
+    // HCE callbacks
+    // -------------------------------------------------------------------------
 
     /**
-     * Returns null to signal asynchronous processing; the actual response is sent via
-     * sendResponseApdu() from the apduExecutor thread to avoid blocking the NFC thread
-     * during potentially slow SE I/O.
+     * Receives every AID SELECT and subsequent APDU from the NFC stack.
+     *
+     * Returns null to signal asynchronous processing; the actual response is
+     * delivered via sendResponseApdu() from apduExecutor to avoid blocking the
+     * NFC thread during potentially slow SE I/O.
      */
     @Override
     public byte[] processCommandApdu(byte[] apdu, Bundle extras) {
         if (apdu == null || apdu.length < 4) return SW_INTERNAL_ERROR;
         AppLog.d("PassthroughHceService: APDU -> " + bytesToHex(apdu));
+
         final byte[] copy = Arrays.copyOf(apdu, apdu.length);
         apduExecutor.execute(() -> {
             byte[] response = dispatchApdu(copy);
             sendResponseApdu(response);
         });
-        return null; // async — response sent via sendResponseApdu()
+        return null; // async — response will be sent via sendResponseApdu()
     }
 
     private byte[] dispatchApdu(byte[] apdu) {
-        if (passthroughController == null) {
+        if (!active || passthroughController == null) {
             AppLog.e("PassthroughHceService: APDU received but OMAPI session not ready");
             return SW_INTERNAL_ERROR;
         }
@@ -187,21 +173,22 @@ public class PassthroughHceService extends HostApduService {
         }
     }
 
+    /**
+     * Called by the NFC stack when the reader field is lost or the transaction
+     * ends. We close the current logical channel so the SE is ready for the next
+     * SELECT, but keep the OMAPI session open for reuse.
+     */
     @Override
     public void onDeactivated(int reason) {
         AppLog.i("PassthroughHceService: deactivated reason=" + reason);
-        // Close channel but keep the session alive for the next transaction.
         if (passthroughController != null) {
             passthroughController.closeCurrentChannel();
         }
-        if (active) {
-            // Re-enter observe mode so we can detect the next reader approach.
-            // AOSP HostEmulationManager re-enables observe mode after field-off with a
-            // RE_ENABLE_OBSERVE_MODE_DELAY_MS delay; we re-enable immediately here because
-            // we always want to catch the next reader.
-            setObserveModeEnabled(true);
-        }
     }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
 
     private void tearDownOmapi() {
         if (passthroughController != null) {
@@ -225,4 +212,3 @@ public class PassthroughHceService extends HostApduService {
         return sb.toString();
     }
 }
-

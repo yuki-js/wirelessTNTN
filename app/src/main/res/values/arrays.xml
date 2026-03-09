@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        LSPosed module scope: the processes this module is allowed to hook.
+        We only need com.android.nfc — the NFC system service process that
+        hosts RegisteredAidCache.resolveAid(), the method we intercept.
+    -->
+    <string-array name="xposed_scope">
+        <item>com.android.nfc</item>
+    </string-array>
+</resources>
