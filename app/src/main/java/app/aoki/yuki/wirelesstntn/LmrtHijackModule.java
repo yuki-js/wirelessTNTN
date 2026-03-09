@@ -364,9 +364,13 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
      *
      * When commit() then runs with our HashMap it calls:
      *   NfcService.routeAids("", ROUTE_HOST, AID_ROUTE_QUAL_PREFIX, POWER_STATE_ALL)
-     *   NfcService.commitRouting(...)
+     *   NfcService.commitRouting()          ← no-arg in Android 15
      * which tells the NFC controller: "for every AID (empty prefix matches all), send
      * to the Device Host."
+     *
+     * ANDROID 15 SPECIFIC: commit() has exactly ONE parameter (HashMap).
+     * Source: AidRoutingManager.java line 487 (android15-release branch):
+     *   private void commit(HashMap<String, AidEntry> routeCache)
      *
      * AidEntry is a non-static inner class of AidRoutingManager. Its implicit outer-class
      * constructor parameter is the AidRoutingManager instance (param.thisObject).
@@ -377,8 +381,7 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
                     "com.android.nfc.cardemulation.AidRoutingManager",
                     classLoader,
                     "commit",
-                    HashMap.class,   // HashMap<String, AidEntry> — type-erased
-                    boolean.class,   // isOverrideOrRecover
+                    HashMap.class,   // HashMap<String, AidEntry> — type-erased; ONLY parameter in Android 15
                     new OverrideLmrtHook()
             );
             XposedBridge.log("LmrtHijackModule: commit() hook installed");
@@ -403,10 +406,11 @@ public class LmrtHijackModule implements IXposedHookLoadPackage {
                 // to the NCI hardware (which is how "" maps) has undefined behavior and
                 // may crash the NFC controller driver.
                 //
-                // AOSP itself only adds the empty-AID entry when NCI >= 2.0
-                // (AidRoutingManager.configureRouting(), line 446).
+                // AOSP Android 15 only adds the empty-AID entry when NCI >= 2.0
+                // AND (mDefaultRoute != mDefaultIsoDepRoute OR mDefaultIsoDepRoute == ROUTE_HOST)
+                // (AidRoutingManager.configureRouting() lines 408-436, android15-release branch)
                 //
-                // We enforce the same guard: if NCI < 2.0, skip the substitution and
+                // We enforce the same NCI guard: if NCI < 2.0, skip the substitution and
                 // let the original commit() proceed unmodified.
                 try {
                     Class<?> nfcServiceClass =
